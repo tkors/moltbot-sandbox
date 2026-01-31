@@ -1,0 +1,14 @@
+name = "moltbot-sandbox"
+main = "src/index.ts"
+compatibility_date = "2026-01-31"
+
+[[durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Sandbox"]
+
+[[containers]]
+class_name = "Sandbox"
