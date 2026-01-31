@@ -78,7 +78,32 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
 
   // Preflight patch: replace "policy":"closed" -> "policy":"disabled" if present
   try {
-    const patchCmd = `sh -lc 'if [ -f /root/.clawdbot/clawdbot.json ] && grep -q "\\\"policy\\\"[[:space:]]*:[[:space:]]*\\\"closed\\\"" /root/.clawdbot/clawdbot.json; then sed -E -i.bak "s/(\\\"policy\\\"[[:space:]]*:[[:space:]]*)\\\"closed\\\"/\\\1\\\"disabled\\\"/g" /root/.clawdbot/clawdbot.json || true; fi'`;
+    const patchCmd = `sh -lc '
+set -e
+
+echo "[preflight] starting dm.policy patch"
+
+for CFG in \
+  /root/.clawdbot/clawdbot.json \
+  /mnt/*/.clawdbot/clawdbot.json \
+  /mnt/*/*/.clawdbot/clawdbot.json \
+  /data/.clawdbot/clawdbot.json \
+  /var/lib/.clawdbot/clawdbot.json
+do
+  if [ -f "$CFG" ]; then
+    if grep -q "\\\"policy\\\"[[:space:]]*:[[:space:]]*\\\"closed\\\"" "$CFG"; then
+      echo "[preflight] patching $CFG"
+      # simple, robust replacement (no -E, no backrefs)
+      sed -i "s/\\\"policy\\\"[[:space:]]*:[[:space:]]*\\\"closed\\\"/\\\"policy\\\":\\\"disabled\\\"/g" "$CFG" || true
+      grep -n "dm" "$CFG" || true
+    else
+      echo "[preflight] ok (no closed) $CFG"
+    fi
+  fi
+done
+
+echo "[preflight] done"
+'`;
     const patchProc = await sandbox.startProcess(patchCmd);
     await waitForProcess(patchProc, 2000);
     try {
@@ -125,6 +150,17 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     console.error('[Gateway] waitForPort failed:', e);
     try {
       const logs = await process.getLogs();
+      try {
+        const findProc = await sandbox.startProcess(
+          `sh -lc 'find / -name clawdbot.json 2>/dev/null | head -n 20'`,
+        );
+        await waitForProcess(findProc, 3000);
+        const findLogs = await findProc.getLogs();
+        if (findLogs.stdout) console.error('[Gateway] find clawdbot.json:', findLogs.stdout);
+        if (findLogs.stderr) console.error('[Gateway] find stderr:', findLogs.stderr);
+      } catch (findErr) {
+        console.error('[Gateway] find fallback failed:', findErr);
+      }
       console.error('[Gateway] startup failed. Stderr:', logs.stderr);
       console.error('[Gateway] startup failed. Stdout:', logs.stdout);
       throw new Error(`Moltbot gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`);
