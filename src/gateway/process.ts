@@ -1,8 +1,8 @@
-import type { Sandbox, Process } from '@cloudflare/sandbox';
-import type { MoltbotEnv } from '../types';
 import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
 import { mountR2Storage } from './r2';
+import { waitForProcess } from './utils';
+import type { MoltbotEnv } from '../types';
 
 /**
  * Find an existing Moltbot gateway process
@@ -74,6 +74,23 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
         console.log('Failed to kill process:', killError);
       }
     }
+  }
+
+  // Preflight patch: replace "policy":"closed" -> "policy":"disabled" if present
+  try {
+    const patchCmd = `sh -lc 'if [ -f /root/.clawdbot/clawdbot.json ] && grep -q "\\\"policy\\\"[[:space:]]*:[[:space:]]*\\\"closed\\\"" /root/.clawdbot/clawdbot.json; then sed -E -i.bak "s/(\\\"policy\\\"[[:space:]]*:[[:space:]]*)\\\"closed\\\"/\\\1\\\"disabled\\\"/g" /root/.clawdbot/clawdbot.json || true; fi'`;
+    const patchProc = await sandbox.startProcess(patchCmd);
+    await waitForProcess(patchProc, 2000);
+    try {
+      const patchLogs = await patchProc.getLogs();
+      if (patchLogs.stdout) console.log('[Gateway] Preflight patch stdout:', patchLogs.stdout);
+      if (patchLogs.stderr) console.log('[Gateway] Preflight patch stderr:', patchLogs.stderr);
+    } catch (logErr) {
+      console.log('[Gateway] Could not read preflight patch logs:', logErr);
+    }
+  } catch (err) {
+    // Non-fatal: if the patch fails, continue to start the gateway and let it fail later if required
+    console.log('[Gateway] Preflight patch failed (non-fatal):', err);
   }
 
   // Start a new Moltbot gateway
